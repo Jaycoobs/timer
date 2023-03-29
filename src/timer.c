@@ -50,6 +50,8 @@ typedef struct {
 
 typedef struct {
     char* name;
+    size_t attempts;
+    size_t completed;
     vec_vec_char_t_t names;
     run_t pb;
 } category_t;
@@ -69,6 +71,20 @@ typedef struct {
     size_t current_split;
     bool new_pb;
 } run_timer_t;
+
+char* path_join(char* base, char* path) {
+    size_t base_len = strlen(base);
+    size_t path_len = strlen(path);
+    char* buffer = malloc(base_len + path_len + 1);
+    strcpy(buffer, base);
+    if (buffer[base_len-1] != '/') {
+        buffer[base_len] = '/';
+        buffer[base_len+1] = '\0';
+        base_len += 1;
+    }
+    strcpy(buffer+base_len, path);
+    return buffer;
+}
 
 bool read_line(vec_char_t* line, FILE* f) {
     line->length = 0;
@@ -362,6 +378,33 @@ void names_delete(vec_vec_char_t_t* names) {
     vec_vec_char_t_delete(names);
 }
 
+bool read_ulong(size_t* l, char* path) {
+    FILE* f = fopen(path, "r");
+
+    if (!f)
+        return false;
+
+    vec_char_t line;
+    vec_char_init(&line);
+
+    read_line(&line, f);
+    *l = atol(line.data);
+
+    vec_char_delete(&line);
+    fclose(f);
+    return true;
+}
+
+void write_ulong(size_t l, char* path) {
+    FILE* f = fopen(path, "w");
+
+    if (!f)
+        return;
+
+    fprintf(f, "%lu\n", l);
+    fclose(f);
+}
+
 void category_delete(category_t* category) {
     run_delete(&category->pb);
 }
@@ -373,24 +416,32 @@ bool category_load(category_t* category, char* path) {
     size_t path_len = strlen(path);
     char* path_buffer = malloc(path_len + 10);
 
-    strcpy(path_buffer, path);
-    if (path[path_len-1] != '/')
-        strcat(path_buffer, "/");
-    strcat(path_buffer, "splits");
-
-    if (!names_load(&category->names, path_buffer)) {
+    char* names_path = path_join(path, "splits");
+    if (!names_load(&category->names, names_path)) {
+        free(names_path);
         return false;
     }
+    free(names_path);
 
-    strcpy(path_buffer, path);
-    if (path[path_len-1] != '/')
-        strcat(path_buffer, "/");
-    strcat(path_buffer, "pb");
-
+    char* pb_path = path_join(path, "pb");
     if (!run_load(&category->pb, path_buffer)) {
+        free(pb_path);
         names_delete(&category->names);
         return false;
     }
+    free(pb_path);
+
+    char* attempt_path = path_join(path, "attempts");
+    if (!read_ulong(&category->attempts, attempt_path)) {
+        category->attempts = 0;
+    }
+    free(attempt_path);
+
+    char* completed_path = path_join(path, "completed");
+    if (!read_ulong(&category->completed, completed_path)) {
+        category->completed = 0;
+    }
+    free(completed_path);
 
     if (!category->pb.present) {
         run_empty(&category->pb, category->names.length);
@@ -407,22 +458,20 @@ bool category_load(category_t* category, char* path) {
     return true;
 }
 
-bool category_write_pb(category_t* category, char* path) {
-    if (!category->pb.present)
-        return true;
+void category_write(category_t* category, char* path) {
+    if (category->pb.present) {
+        char* pb_path = path_join(path, "pb");
+        run_write(&category->pb, category, pb_path);
+        free(pb_path);
+    }
 
-    size_t path_len = strlen(path);
-    char* path_buffer = malloc(path_len + 10);
+    char* attempt_path = path_join(path, "attempts");
+    write_ulong(category->attempts, attempt_path);
+    free(attempt_path);
 
-    strcpy(path_buffer, path);
-    if (path[path_len-1] != '/')
-        strcat(path_buffer, "/");
-    strcat(path_buffer, "pb");
-
-    bool result = run_write(&category->pb, category, path_buffer);
-
-    free(path_buffer);
-    return result;
+    char* completed_path = path_join(path, "completed");
+    write_ulong(category->completed, completed_path);
+    free(completed_path);
 }
 
 void timer_check_run(run_timer_t* timer) {
@@ -484,8 +533,12 @@ void timer_stop(run_timer_t* timer) {
         timer->state = PAUSED;
         time_now(&timer->pause_time);
     } else if (timer->state == PAUSED) {
-        if (timer->current_split >= timer->category.names.length)
+        timer->category.attempts += 1;
+
+        if (timer->current_split >= timer->category.names.length) {
+            timer->category.completed += 1;
             timer_check_run(timer);
+        }
 
         timer->state = STOPPED;
         timer->current_split = 0;
@@ -603,11 +656,6 @@ void timer_update(run_timer_t* timer) {
     }
 }
 
-void timer_write(run_timer_t* timer, char* path) {
-    if (timer->new_pb)
-        category_write_pb(&timer->category, path);
-}
-
 int main(int argc, char** argv) {
     if (argc < 2) {
         fprintf(stderr, "Use %s <split dir>\n", argv[0]);
@@ -706,8 +754,7 @@ int main(int argc, char** argv) {
     tcsetattr(STDIN_FILENO, TCSANOW, &prev_tty_attrs);
     tty_show_cursor();
 
-    timer_write(&timer, argv[1]);
-
+    category_write(&timer.category, argv[1]);
     category_delete(&timer.category);
     return 0;
 }
