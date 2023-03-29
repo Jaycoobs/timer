@@ -644,6 +644,7 @@ int main(int argc, char** argv) {
     timer_draw_splits(&timer, term_width, term_height);
 
     int c;
+    int redraw_counter = 0;
     while (true) {
         c = 0;
         read(STDIN_FILENO, &c, 1);
@@ -693,7 +694,8 @@ int main(int argc, char** argv) {
             timer_draw_splits(&timer, term_width, term_height);
         }
 
-        if (timer.state == RUNNING) {
+        if (timer.state == RUNNING && redraw_counter++ > 100) {
+            redraw_counter = 0;
             timer_update(&timer);
             timer_draw_split(&timer, timer.current_split, term_width, term_height);
         }
