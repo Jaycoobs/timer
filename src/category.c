@@ -188,6 +188,11 @@ bool category_load(category_t* category, char* path) {
         run_empty(&category->golds, category->names.length);
     }
 
+    if (category->attempts.length == 0) {
+        for (size_t i = 0; i < category->names.length+1; i++)
+            vec_size_t_push(&category->attempts, 0);
+    }
+
     if (category->pb.splits.length != category->names.length) {
         fprintf(stderr, "The number of splits in your pb doesn't match the number of splits in this category.\n");
         category_delete(category);
