@@ -145,9 +145,6 @@ void category_delete(category_t* category) {
 bool category_load(category_t* category, char* path) {
     category->name = path;
 
-    size_t path_len = strlen(path);
-    char* path_buffer = malloc(path_len + 10);
-
     char* names_path = path_join(path, "splits");
     if (!names_load(&category->names, names_path)) {
         free(names_path);
@@ -205,14 +202,10 @@ bool category_load(category_t* category, char* path) {
 
     if (category->attempts.length != category->names.length + 1) {
         fprintf(stderr, "The number of splits in your attempts doesn't match the number of splits in this category.\n");
-
-        vec_size_t_delete(&category->attempts);
-        vec_size_t_init(&category->attempts);
-        for (size_t i = 0; i < category->names.length+1; i++)
-            vec_size_t_push(&category->attempts, 0);
+        category_delete(category);
+        return false;
     }
 
-    free(path_buffer);
     return true;
 }
 
