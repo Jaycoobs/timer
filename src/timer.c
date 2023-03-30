@@ -33,6 +33,10 @@ typedef struct {
 #include "vec.h"
 #undef VEC_TYPE
 
+#define VEC_TYPE size_t
+#include "vec.h"
+#undef VEC_TYPE
+
 #define VEC_TYPE char
 #include "vec.h"
 #undef VEC_TYPE
@@ -50,10 +54,10 @@ typedef struct {
 
 typedef struct {
     char* name;
-    size_t attempts;
-    size_t completed;
+    vec_size_t_t attempts;
     vec_vec_char_t_t names;
     run_t pb;
+    run_t golds;
 } category_t;
 
 typedef enum {
@@ -69,7 +73,6 @@ typedef struct {
     category_t category;
     run_t current_run;
     size_t current_split;
-    bool new_pb;
 } run_timer_t;
 
 char* path_join(char* base, char* path) {
@@ -251,7 +254,7 @@ void run_empty(run_t* r, size_t split_count) {
     }
 }
 
-bool run_load(run_t* r, char* path) {
+bool run_load(run_t* r, char* path, bool segments_only) {
     FILE* f = fopen(path, "r");
 
     if (!f) {
@@ -268,6 +271,11 @@ bool run_load(run_t* r, char* path) {
     r->present = true;
     vec_duration_t_init(&r->splits);
 
+    size_t field = 2;
+
+    if (segments_only)
+        field = 1;
+
     size_t line_num = 1;
 
     vec_char_t line;
@@ -280,11 +288,16 @@ bool run_load(run_t* r, char* path) {
         char* token;
 
         token = strtok_r(line.data, " \t", &saveptr);
-        for (size_t i = 0; i < 2; i++) {
+        for (size_t i = 0; i < 1; i++) {
             token = strtok_r(NULL, " \t", &saveptr);
             if (!token) {
                 fprintf(stderr, "Failed to read run file %s at line %d\n", path, line_num);
-                fprintf(stderr, "line must have split name, segment time, and split time\n");
+
+                if (segments_only)
+                    fprintf(stderr, "line must have split name and segment time\n");
+                else
+                    fprintf(stderr, "line must have split name, segment time, and split time\n");
+
                 return false;
             }
         }
@@ -312,7 +325,7 @@ void run_get_split_duration(duration_t* d, run_t* r, size_t i) {
     }
 }
 
-bool run_write(run_t* r, category_t* c, char* path) {
+bool run_write(run_t* r, category_t* c, char* path, bool times_only) {
     FILE* f = fopen(path, "w");
 
     if (!f) {
@@ -329,13 +342,15 @@ bool run_write(run_t* r, category_t* c, char* path) {
     char time_buffer[buffer_lengths];
 
     for (size_t i = 0; i < r->splits.length; i++) {
-        run_get_split_duration(&duration, r, i);
-        time = r->splits.data[i];
+        duration_print(time_buffer, buffer_lengths, &r->splits.data[i], false, true);
 
-        duration_print(duration_buffer, buffer_lengths, &duration, false, true);
-        duration_print(time_buffer, buffer_lengths, &time, false, true);
-
-        fprintf(f, "%-20s%15s%15s\n", c->names.data[i].data, duration_buffer, time_buffer);
+        if (times_only) {
+            fprintf(f, "%-20s%15s\n", c->names.data[i].data, time_buffer);
+        } else {
+            run_get_split_duration(&duration, r, i);
+            duration_print(duration_buffer, buffer_lengths, &duration, false, true);
+            fprintf(f, "%-20s%15s%15s\n", c->names.data[i].data, duration_buffer, time_buffer);
+        }
     }
 
     fclose(f);
@@ -378,31 +393,65 @@ void names_delete(vec_vec_char_t_t* names) {
     vec_vec_char_t_delete(names);
 }
 
-bool read_ulong(size_t* l, char* path) {
+bool attempts_load(vec_size_t_t* attempts, char* path) {
+    vec_size_t_init(attempts);
+
     FILE* f = fopen(path, "r");
 
     if (!f)
         return false;
 
+    size_t line_num = 1;
+
     vec_char_t line;
     vec_char_init(&line);
 
-    read_line(&line, f);
-    *l = atol(line.data);
+    while (read_line(&line, f)) {
+        char* saveptr;
+        char* token;
+
+        token = strtok_r(line.data, " \t", &saveptr);
+        for (size_t i = 0; i < 1; i++) {
+            token = strtok_r(NULL, " \t", &saveptr);
+            if (!token) {
+                fprintf(stderr, "Failed to read attempts file %s at line %d\n", path, line_num);
+                fprintf(stderr, "line must have split name and attempt count\n");
+                return false;
+            }
+        }
+
+        size_t count = atol(token);
+        vec_size_t_push(attempts, count);
+
+        line.length = 0;
+        line_num++;
+    }
 
     vec_char_delete(&line);
+
     fclose(f);
     return true;
 }
 
-void write_ulong(size_t l, char* path) {
+bool attempts_write(vec_size_t_t* attempts, category_t* category, char* path) {
     FILE* f = fopen(path, "w");
 
-    if (!f)
-        return;
+    if (!f) {
+        fprintf(stderr, "Failed to open file for writing: %s\n", path);
+        perror(NULL);
+        return false;
+    }
 
-    fprintf(f, "%lu\n", l);
+    size_t buffer_lengths = 15;
+    char duration_buffer[buffer_lengths];
+    char time_buffer[buffer_lengths];
+
+    for (size_t i = 0; i < category->names.length; i++)
+        fprintf(f, "%-20s%6d\n", category->names.data[i].data, attempts->data[i]);
+    fprintf(f, "%-20s%6ld\n", "completed", attempts->data[attempts->length-1]);
+
     fclose(f);
+    return true;
 }
 
 void category_delete(category_t* category) {
@@ -424,34 +473,57 @@ bool category_load(category_t* category, char* path) {
     free(names_path);
 
     char* pb_path = path_join(path, "pb");
-    if (!run_load(&category->pb, path_buffer)) {
+    if (!run_load(&category->pb, pb_path, false)) {
         free(pb_path);
         names_delete(&category->names);
         return false;
     }
     free(pb_path);
 
-    char* attempt_path = path_join(path, "attempts");
-    if (!read_ulong(&category->attempts, attempt_path)) {
-        category->attempts = 0;
+    char* golds_path = path_join(path, "golds");
+    if (!run_load(&category->golds, golds_path, true)) {
+        free(golds_path);
+        names_delete(&category->names);
+        run_delete(&category->pb);
+        return false;
     }
-    free(attempt_path);
+    free(golds_path);
 
-    char* completed_path = path_join(path, "completed");
-    if (!read_ulong(&category->completed, completed_path)) {
-        category->completed = 0;
+    char* attempts_path = path_join(path, "attempts");
+    if (!attempts_load(&category->attempts, attempts_path)) {
+        for (size_t i = 0; i < category->names.length+1; i++)
+            vec_size_t_push(&category->attempts, 0);
     }
-    free(completed_path);
+    free(attempts_path);
 
     if (!category->pb.present) {
         run_empty(&category->pb, category->names.length);
         category->pb.present = false;
     }
 
+    if (!category->golds.present) {
+        run_empty(&category->golds, category->names.length);
+    }
+
     if (category->pb.splits.length != category->names.length) {
-        fprintf(stderr, "The number of splits in your pb doesn't match the number of splits in this category.");
+        fprintf(stderr, "The number of splits in your pb doesn't match the number of splits in this category.\n");
         category_delete(category);
         return false;
+    }
+
+    if (category->golds.splits.length != category->names.length) {
+        fprintf(stderr, "The number of splits in your golds doesn't match the number of splits in this category.\n");
+        category_delete(category);
+        return false;
+    }
+
+    if (category->attempts.length != category->names.length + 1) {
+        fprintf(stderr, "The number of splits in your attempts doesn't match the number of splits in this category.\n");
+
+        vec_size_t_delete(&category->attempts);
+        vec_size_t_init(&category->attempts);
+        for (size_t i = 0; i < category->names.length+1; i++)
+            vec_size_t_push(&category->attempts, 0);
     }
 
     free(path_buffer);
@@ -461,32 +533,49 @@ bool category_load(category_t* category, char* path) {
 void category_write(category_t* category, char* path) {
     if (category->pb.present) {
         char* pb_path = path_join(path, "pb");
-        run_write(&category->pb, category, pb_path);
+        run_write(&category->pb, category, pb_path, false);
         free(pb_path);
     }
 
-    char* attempt_path = path_join(path, "attempts");
-    write_ulong(category->attempts, attempt_path);
-    free(attempt_path);
+    char* golds_path = path_join(path, "golds");
+    run_write(&category->golds, category, golds_path, true);
+    free(golds_path);
 
-    char* completed_path = path_join(path, "completed");
-    write_ulong(category->completed, completed_path);
-    free(completed_path);
+    char* attempts_path = path_join(path, "attempts");
+    attempts_write(&category->attempts, category, attempts_path);
+    free(attempts_path);
 }
 
 void timer_check_run(run_timer_t* timer) {
     size_t split_count = timer->category.names.length;
 
-    struct timespec diff;
+    struct timespec tdiff;
 
-    if (!timer->category.pb.present ||
-        !time_sub(&diff, &timer->current_run.splits.data[split_count-1].value,
-                  &timer->category.pb.splits.data[split_count-1].value))
-    {
-        timer->new_pb = true;
-        timer->category.pb.present = true;
-        for (size_t i = 0; i < split_count; i++) {
-            timer->category.pb.splits.data[i] = timer->current_run.splits.data[i];
+    if (timer->current_split >= split_count) {
+        if (!timer->category.pb.present ||
+            !time_sub(&tdiff, &timer->current_run.splits.data[split_count-1].value,
+                      &timer->category.pb.splits.data[split_count-1].value))
+        {
+            timer->category.pb.present = true;
+            for (size_t i = 0; i < split_count; i++) {
+                timer->category.pb.splits.data[i] = timer->current_run.splits.data[i];
+            }
+        }
+    }
+
+    duration_t diff;
+    for (size_t i = 0; i <= timer->current_split; i++) {
+        timer->category.attempts.data[i] += 1;
+
+        duration_t current_segment;
+        duration_t best_segment = timer->category.golds.splits.data[i];
+
+        run_get_split_duration(&current_segment, &timer->current_run, i);
+
+        duration_sub(&diff, &current_segment, &best_segment);
+
+        if (!best_segment.present || (diff.present && diff.minus)) {
+            timer->category.golds.splits.data[i] = current_segment;
         }
     }
 }
@@ -533,12 +622,7 @@ void timer_stop(run_timer_t* timer) {
         timer->state = PAUSED;
         time_now(&timer->pause_time);
     } else if (timer->state == PAUSED) {
-        timer->category.attempts += 1;
-
-        if (timer->current_split >= timer->category.names.length) {
-            timer->category.completed += 1;
-            timer_check_run(timer);
-        }
+        timer_check_run(timer);
 
         timer->state = STOPPED;
         timer->current_split = 0;
@@ -665,7 +749,6 @@ int main(int argc, char** argv) {
     run_timer_t timer = {
         .state = STOPPED,
         .current_split = 0,
-        .new_pb = false
     };
 
     if (!category_load(&timer.category, argv[1])) {
@@ -726,7 +809,7 @@ int main(int argc, char** argv) {
                 if (path_buffer[strlen(argv[1])-1] != '/')
                     strcat(path_buffer, "/");
                 strcat(path_buffer, file_name);
-                run_write(&timer.current_run, &timer.category, path_buffer);
+                run_write(&timer.current_run, &timer.category, path_buffer, false);
 
                 free(path_buffer);
                 free(file_name);
