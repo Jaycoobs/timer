@@ -395,11 +395,17 @@ void names_delete(vec_vec_char_t_t* names) {
 
 bool attempts_load(vec_size_t_t* attempts, char* path) {
     vec_size_t_init(attempts);
-
     FILE* f = fopen(path, "r");
 
-    if (!f)
-        return false;
+    if (!f) {
+        if (errno == ENOENT) {
+            return true;
+        } else {
+            fprintf(stderr, "Failed to attempts file.");
+            perror(NULL);
+            return false;
+        }
+    }
 
     size_t line_num = 1;
 
@@ -411,11 +417,11 @@ bool attempts_load(vec_size_t_t* attempts, char* path) {
         char* token;
 
         token = strtok_r(line.data, " \t", &saveptr);
-        for (size_t i = 0; i < 1; i++) {
+        for (size_t i = 0; i < 2; i++) {
             token = strtok_r(NULL, " \t", &saveptr);
             if (!token) {
                 fprintf(stderr, "Failed to read attempts file %s at line %d\n", path, line_num);
-                fprintf(stderr, "line must have split name and attempt count\n");
+                fprintf(stderr, "line must have split name, reset count, attempt count\n");
                 return false;
             }
         }
@@ -447,8 +453,11 @@ bool attempts_write(vec_size_t_t* attempts, category_t* category, char* path) {
     char time_buffer[buffer_lengths];
 
     for (size_t i = 0; i < category->names.length; i++)
-        fprintf(f, "%-20s%6d\n", category->names.data[i].data, attempts->data[i]);
-    fprintf(f, "%-20s%6ld\n", "completed", attempts->data[attempts->length-1]);
+        fprintf(f, "%-20s%6d%6d\n",
+                category->names.data[i].data,
+                attempts->data[i]-attempts->data[i+1],
+                attempts->data[i]);
+    fprintf(f, "%-20s%6ld%6ld\n", "completed", 0, attempts->data[attempts->length-1]);
 
     fclose(f);
     return true;
@@ -491,8 +500,11 @@ bool category_load(category_t* category, char* path) {
 
     char* attempts_path = path_join(path, "attempts");
     if (!attempts_load(&category->attempts, attempts_path)) {
-        for (size_t i = 0; i < category->names.length+1; i++)
-            vec_size_t_push(&category->attempts, 0);
+        free(attempts_path);
+        names_delete(&category->names);
+        run_delete(&category->pb);
+        run_delete(&category->golds);
+        return false;
     }
     free(attempts_path);
 
@@ -566,6 +578,10 @@ void timer_check_run(run_timer_t* timer) {
     duration_t diff;
     for (size_t i = 0; i <= timer->current_split; i++) {
         timer->category.attempts.data[i] += 1;
+
+        // don't overwrite gold on current split
+        if (i == timer->current_split)
+            continue;
 
         duration_t current_segment;
         duration_t best_segment = timer->category.golds.splits.data[i];
