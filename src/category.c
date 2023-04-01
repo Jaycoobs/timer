@@ -217,12 +217,12 @@ bool category_load(category_t* category, char* path) {
 void category_write(category_t* category, char* path) {
     if (category->pb.present) {
         char* pb_path = path_join(path, "pb");
-        run_write(&category->pb, &category->names, pb_path, false);
+        run_write(&category->pb, &category->names, pb_path);
         free(pb_path);
     }
 
     char* golds_path = path_join(path, "golds");
-    run_write(&category->golds, &category->names, golds_path, true);
+    run_write(&category->golds, &category->names, golds_path);
     free(golds_path);
 
     char* attempts_path = path_join(path, "attempts");

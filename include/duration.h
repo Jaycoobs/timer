@@ -11,6 +11,8 @@ typedef struct {
     struct timespec value;
 } duration_t;
 
+void duration_add(duration_t* d, duration_t* a, duration_t* b);
+
 void duration_sub(duration_t* d, duration_t* a, duration_t* b);
 
 void duration_parse(duration_t* d, char* s);

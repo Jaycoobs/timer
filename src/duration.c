@@ -5,6 +5,15 @@
 #include "time_funcs.h"
 #include "duration.h"
 
+void duration_add(duration_t* d, duration_t* a, duration_t* b) {
+    if (!a->present || !b->present) {
+        d->present = false;
+        return;
+    }
+
+    time_add(&d->value, &a->value, &b->value);
+}
+
 void duration_sub(duration_t* d, duration_t* a, duration_t* b) {
     if (!a->present || !b->present) {
         d->present = false;

@@ -302,7 +302,7 @@ int main(int argc, char** argv) {
                 if (path_buffer[strlen(argv[1])-1] != '/')
                     strcat(path_buffer, "/");
                 strcat(path_buffer, file_name);
-                run_write(&timer.current_run, &timer.category.names, path_buffer, false);
+                run_write(&timer.current_run, &timer.category.names, path_buffer);
 
                 free(path_buffer);
                 free(file_name);

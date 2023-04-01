@@ -30,6 +30,7 @@ bool run_load(run_t* r, char* path, bool segments_only) {
     }
 
     r->present = true;
+    r->segments = segments_only;
     vec_duration_t_init(&r->splits);
 
     size_t field = 2;
@@ -86,7 +87,7 @@ void run_get_split_duration(duration_t* d, run_t* r, size_t i) {
     }
 }
 
-bool run_write(run_t* r, vec_vec_char_t_t* names, char* path, bool times_only) {
+bool run_write(run_t* r, vec_vec_char_t_t* names, char* path) {
     FILE* f = fopen(path, "w");
 
     if (!f) {
@@ -98,20 +99,31 @@ bool run_write(run_t* r, vec_vec_char_t_t* names, char* path, bool times_only) {
     duration_t duration;
     duration_t time;
 
+    if (r->segments) {
+        time.minus = false;
+        time.present = true;
+        time.value = (struct timespec) {
+            .tv_sec = 0,
+            .tv_nsec = 0
+        };
+    }
+
     size_t buffer_lengths = 15;
     char duration_buffer[buffer_lengths];
     char time_buffer[buffer_lengths];
 
     for (size_t i = 0; i < r->splits.length; i++) {
-        duration_print(time_buffer, buffer_lengths, &r->splits.data[i], false, true);
-
-        if (times_only) {
-            fprintf(f, "%-20s%15s\n", names->data[i].data, time_buffer);
+        if (r->segments) {
+            duration = r->splits.data[i];
+            duration_add(&time, &time, &duration);
         } else {
+            time = r->splits.data[i];
             run_get_split_duration(&duration, r, i);
-            duration_print(duration_buffer, buffer_lengths, &duration, false, true);
-            fprintf(f, "%-20s%15s%15s\n", names->data[i].data, duration_buffer, time_buffer);
         }
+
+        duration_print(duration_buffer, buffer_lengths, &duration, false, true);
+        duration_print(time_buffer, buffer_lengths, &time, false, true);
+        fprintf(f, "%-20s%15s%15s\n", names->data[i].data, duration_buffer, time_buffer);
     }
 
     fclose(f);
