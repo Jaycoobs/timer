@@ -50,7 +50,7 @@ bool run_load(run_t* r, char* path, bool segments_only) {
         char* token;
 
         token = strtok_r(line.data, " \t", &saveptr);
-        for (size_t i = 0; i < 1; i++) {
+        for (size_t i = 0; i < field; i++) {
             token = strtok_r(NULL, " \t", &saveptr);
             if (!token) {
                 fprintf(stderr, "Failed to read run file %s at line %d\n", path, line_num);
